@@ -3564,8 +3564,8 @@ static bool get_mmio_spte(struct kvm_vcpu *vcpu, u64 addr, u64 *sptep)
 		 * reserved bit and EPT's invalid memtype/XWR checks to avoid
 		 * adding a Jcc in the loop.
 		 */
-		reserved |= __is_bad_mt_xwr(rsvd_check, sptes[level]) |
-			    __is_rsvd_bits_set(rsvd_check, sptes[level], level);
+		reserved |= (int)__is_bad_mt_xwr(rsvd_check, sptes[level]) |
+			    (int)__is_rsvd_bits_set(rsvd_check, sptes[level], level);
 
 	if (reserved) {
 		pr_err("%s: detect reserved bits on spte, addr 0x%llx, dump hierarchy:\n",

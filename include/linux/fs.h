@@ -683,6 +683,7 @@ struct inode {
 	};
 	atomic64_t		i_version;
 	atomic64_t		i_sequence; /* see futex */
+	atomic64_t		i_sequence2; /* see futex2 */
 	atomic_t		i_count;
 	atomic_t		i_dio_count;
 	atomic_t		i_writecount;
@@ -3588,6 +3589,17 @@ static inline int inode_drain_writes(struct inode *inode)
 {
 	inode_dio_wait(inode);
 	return filemap_write_and_wait(inode->i_mapping);
+}
+
+extern int device_sidechannel_restrict;
+
+static inline bool is_sidechannel_device(const struct inode *inode)
+{
+	umode_t mode;
+	if (!device_sidechannel_restrict)
+		return false;
+	mode = inode->i_mode;
+	return ((S_ISCHR(mode) || S_ISBLK(mode)) && (mode & (S_IROTH | S_IWOTH)));
 }
 
 #endif /* _LINUX_FS_H */

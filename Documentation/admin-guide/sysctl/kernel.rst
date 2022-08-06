@@ -436,6 +436,16 @@ this allows system administrators to override the
 ``IA64_THREAD_UAC_NOPRINT`` ``prctl`` and avoid logs being flooded.
 
 
+iso_cpu: (MuQSS CPU scheduler only)
+===================================
+
+This sets the percentage cpu that the unprivileged SCHED_ISO tasks can
+run effectively at realtime priority, averaged over a rolling five
+seconds over the -whole- system, meaning all cpus.
+
+Set to 70 (percent) by default.
+
+
 kexec_load_disabled
 ===================
 
@@ -860,6 +870,8 @@ with respect to CAP_PERFMON use cases.
 >=1  Disallow CPU event access by users without ``CAP_PERFMON``.
 
 >=2  Disallow kernel profiling by users without ``CAP_PERFMON``.
+
+>=3  Disallow use of any event by users without ``CAP_PERFMON``.
 ===  ==================================================================
 
 
@@ -1075,6 +1087,20 @@ reboot-cmd (SPARC only)
 ??? This seems to be a way to give an argument to the Sparc
 ROM/Flash boot loader. Maybe to tell it what to do after
 rebooting. ???
+
+
+rr_interval: (MuQSS CPU scheduler only)
+=======================================
+
+This is the smallest duration that any cpu process scheduling unit
+will run for. Increasing this value can increase throughput of cpu
+bound tasks substantially but at the expense of increased latencies
+overall. Conversely decreasing it will decrease average and maximum
+latencies but at the expense of throughput. This value is in
+milliseconds and the default value chosen depends on the number of
+cpus available at scheduler initialisation with a minimum of 6.
+
+Valid values are from 1-1000.
 
 
 sched_energy_aware
@@ -1383,6 +1409,26 @@ If a value outside of this range is written to ``threads-max`` an
 ``EINVAL`` error occurs.
 
 
+tiocsti_restrict
+================
+
+This toggle indicates whether unprivileged users are prevented from using the
+``TIOCSTI`` ioctl to inject commands into other processes which share a tty
+session.
+
+= ============================================================================
+0 No restriction, except the default one of only being able to inject commands
+  into one's own tty.
+1 Users must have ``CAP_SYS_ADMIN`` to use the ``TIOCSTI`` ioctl.
+= ============================================================================
+
+When user namespaces are in use, the check for ``CAP_SYS_ADMIN`` is done
+against the user namespace that originally opened the tty.
+
+The kernel config option ``CONFIG_SECURITY_TIOCSTI_RESTRICT`` sets the default
+value of ``tiocsti_restrict``.
+
+
 traceoff_on_warning
 ===================
 
@@ -1515,3 +1561,13 @@ is 10 seconds.
 
 The softlockup threshold is (``2 * watchdog_thresh``). Setting this
 tunable to zero will disable lockup detection altogether.
+
+
+yield_type: (MuQSS CPU scheduler only)
+======================================
+
+This determines what type of yield calls to sched_yield will perform.
+
+ 0: No yield.
+ 1: Yield only to better priority/deadline tasks. (default)
+ 2: Expire timeslice and recalculate deadline.

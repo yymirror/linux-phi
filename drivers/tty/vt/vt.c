@@ -297,6 +297,20 @@ static inline unsigned short *screenpos(const struct vc_data *vc, int offset,
 	return p;
 }
 
+static inline unsigned short *screenpos_utf8(const struct vc_data *vc, int offset,
+		bool viewed)
+{
+	unsigned short *p;
+
+	if (!viewed)
+		p = (unsigned short *)(vc->vc_origin + offset + vc->vc_screenbuf_size);
+	else if (!vc->vc_sw->con_screen_pos)
+		p = (unsigned short *)(vc->vc_visible_origin + offset + vc->vc_screenbuf_size);
+	else
+		p = vc->vc_sw->con_screen_pos(vc, -offset - 1);
+	return p;
+}
+
 /* Called  from the keyboard irq path.. */
 static inline void scrolldelta(int lines)
 {
@@ -639,6 +653,10 @@ static void con_scroll(struct vc_data *vc, unsigned int t, unsigned int b,
 	}
 	scr_memmovew(d, s, (b - t - nr) * vc->vc_size_row);
 	scr_memsetw(clear, vc->vc_video_erase_char, vc->vc_size_row * nr);
+	d += (vc->vc_screenbuf_size >> 1);
+	s += (vc->vc_screenbuf_size >> 1);
+	scr_memmovew(d, s, (b - t - nr) * vc->vc_size_row);
+	scr_memsetw(clear, 0, vc->vc_size_row * nr);
 }
 
 static void do_update_region(struct vc_data *vc, unsigned long start, int count)
@@ -806,6 +824,7 @@ void complement_pos(struct vc_data *vc, int offset)
 {
 	static int old_offset = -1;
 	static unsigned short old;
+	static unsigned short old_utf;
 	static unsigned short oldx, oldy;
 
 	WARN_CONSOLE_UNLOCKED();
@@ -814,7 +833,7 @@ void complement_pos(struct vc_data *vc, int offset)
 	    old_offset < vc->vc_screenbuf_size) {
 		scr_writew(old, screenpos(vc, old_offset, true));
 		if (con_should_update(vc))
-			vc->vc_sw->con_putc(vc, old, oldy, oldx);
+			vc->vc_sw->con_putc(vc, (old_utf << 16) | old, oldy, oldx);
 		notify_update(vc);
 	}
 
@@ -824,14 +843,17 @@ void complement_pos(struct vc_data *vc, int offset)
 	    offset < vc->vc_screenbuf_size) {
 		unsigned short new;
 		unsigned short *p;
+		unsigned short *p_utf;
 		p = screenpos(vc, offset, true);
+		p_utf = screenpos_utf8(vc, offset, true);
 		old = scr_readw(p);
+		old_utf = scr_readw(p_utf);
 		new = old ^ vc->vc_complement_mask;
 		scr_writew(new, p);
 		if (con_should_update(vc)) {
 			oldx = (offset >> 1) % vc->vc_cols;
 			oldy = (offset >> 1) / vc->vc_cols;
-			vc->vc_sw->con_putc(vc, new, oldy, oldx);
+			vc->vc_sw->con_putc(vc, (old_utf << 16) | new, oldy, oldx);
 		}
 		notify_update(vc);
 	}
@@ -1144,7 +1166,7 @@ int vc_allocate(unsigned int currcons)	/* return 0 on success */
 	    vc->vc_screenbuf_size > KMALLOC_MAX_SIZE || !vc->vc_screenbuf_size)
 		goto err_free;
 	err = -ENOMEM;
-	vc->vc_screenbuf = kzalloc(vc->vc_screenbuf_size, GFP_KERNEL);
+	vc->vc_screenbuf = kzalloc(vc->vc_screenbuf_size * 2, GFP_KERNEL);
 	if (!vc->vc_screenbuf)
 		goto err_free;
 
@@ -1198,6 +1220,7 @@ static int vc_do_resize(struct tty_struct *tty, struct vc_data *vc,
 	unsigned long old_origin, new_origin, new_scr_end, rlth, rrem, err = 0;
 	unsigned long end;
 	unsigned int old_rows, old_row_size, first_copied_row;
+	unsigned int old_screen_size;
 	unsigned int new_cols, new_rows, new_row_size, new_screen_size;
 	unsigned int user;
 	unsigned short *oldscreen, *newscreen;
@@ -1224,7 +1247,7 @@ static int vc_do_resize(struct tty_struct *tty, struct vc_data *vc,
 
 	if (new_screen_size > KMALLOC_MAX_SIZE || !new_screen_size)
 		return -EINVAL;
-	newscreen = kzalloc(new_screen_size, GFP_USER);
+	newscreen = kzalloc(new_screen_size * 2, GFP_USER);
 	if (!newscreen)
 		return -ENOMEM;
 
@@ -1241,6 +1264,7 @@ static int vc_do_resize(struct tty_struct *tty, struct vc_data *vc,
 
 	old_rows = vc->vc_rows;
 	old_row_size = vc->vc_size_row;
+	old_screen_size = old_row_size * old_rows;
 
 	err = resize_screen(vc, new_cols, new_rows, user);
 	if (err) {
@@ -1289,15 +1313,23 @@ static int vc_do_resize(struct tty_struct *tty, struct vc_data *vc,
 	while (old_origin < end) {
 		scr_memcpyw((unsigned short *) new_origin,
 			    (unsigned short *) old_origin, rlth);
-		if (rrem)
+		scr_memcpyw((unsigned short *) new_origin + (new_screen_size >> 1),
+			    (unsigned short *) old_origin + (old_screen_size >> 1), rlth);
+		if (rrem) {
 			scr_memsetw((void *)(new_origin + rlth),
 				    vc->vc_video_erase_char, rrem);
+			scr_memsetw((void *)(new_origin + rlth + (new_screen_size)),
+				    vc->vc_video_erase_char, rrem);
+		}
 		old_origin += old_row_size;
 		new_origin += new_row_size;
 	}
-	if (new_scr_end > new_origin)
+	if (new_scr_end > new_origin) {
 		scr_memsetw((void *)new_origin, vc->vc_video_erase_char,
 			    new_scr_end - new_origin);
+		scr_memsetw((void *)new_origin + (new_screen_size), vc->vc_video_erase_char,
+			    new_scr_end - new_origin);
+	}
 	oldscreen = vc->vc_screenbuf;
 	vc->vc_screenbuf = newscreen;
 	vc->vc_screenbuf_size = new_screen_size;
@@ -2790,7 +2822,8 @@ static int vc_con_write_normal(struct vc_data *vc, int tc, int c,
 			 * question mark.
 			 */
 			tc = conv_uni_to_pc(vc, 0xfffd);
-			if (tc < 0) {
+			/* no inverse if it can display */
+			if (tc < 0 && c > 0xffff) {
 				inverse = true;
 				tc = conv_uni_to_pc(vc, '?');
 				if (tc < 0)
@@ -2804,6 +2837,12 @@ static int vc_con_write_normal(struct vc_data *vc, int tc, int c,
 
 	next_c = c;
 	while (1) {
+		/* fix line wrap for double width characters */
+		if (vc->state.x == vc->vc_cols - 1 && width == 2) {
+			vc->vc_need_wrap = vc->vc_decawm;
+			draw->to = vc->vc_pos + 2;
+		}
+
 		if (vc->vc_need_wrap || vc->vc_decim)
 			con_flush(vc, draw);
 		if (vc->vc_need_wrap) {
@@ -2814,12 +2853,22 @@ static int vc_con_write_normal(struct vc_data *vc, int tc, int c,
 			insert_char(vc, 1);
 		vc_uniscr_putc(vc, next_c);
 
+		if (c > 0xff && c <= 0xffff) {
+			if (is_double_width(c))
+				tc = (width == 1) ? 0xfe : 0xff;
+			else
+				tc = 0xff;
+		}
 		if (himask)
 			tc = ((tc & 0x100) ? himask : 0) |
 			      (tc &  0xff);
 		tc |= (vc_attr << 8) & ~himask;
 
 		scr_writew(tc, (u16 *)vc->vc_pos);
+		if (c > 0xff && c <= 0xffff)
+			scr_writew(c, (u16 *)vc->vc_pos + (vc->vc_screenbuf_size >> 1));
+		else
+			scr_writew(0, (u16 *)vc->vc_pos + (vc->vc_screenbuf_size >> 1));
 
 		if (con_should_update(vc) && draw->x < 0) {
 			draw->x = vc->state.x;
@@ -2841,11 +2890,12 @@ static int vc_con_write_normal(struct vc_data *vc, int tc, int c,
 		if (tc < 0)
 			tc = ' ';
 		next_c = ' ';
-	}
-	notify_write(vc, c);
 
-	if (inverse)
-		con_flush(vc, draw);
+		notify_write(vc, c);
+
+		if (inverse)
+			con_flush(vc, draw);
+	}
 
 	return 0;
 }
@@ -2886,6 +2936,8 @@ static int do_con_write(struct tty_struct *tty, const unsigned char *buf, int co
 	if (con_is_fg(vc))
 		hide_cursor(vc);
 
+	vc->vc_utf = 1;
+	vc->vc_disp_ctrl = 0;
 	param.vc = vc;
 
 	while (!tty->stopped && count) {
@@ -3490,7 +3542,7 @@ static int __init con_init(void)
 		tty_port_init(&vc->port);
 		visual_init(vc, currcons, 1);
 		/* Assuming vc->vc_{cols,rows,screenbuf_size} are sane here. */
-		vc->vc_screenbuf = kzalloc(vc->vc_screenbuf_size, GFP_NOWAIT);
+		vc->vc_screenbuf = kzalloc(vc->vc_screenbuf_size * 2, GFP_NOWAIT);
 		vc_init(vc, vc->vc_rows, vc->vc_cols,
 			currcons || !vc->vc_sw->con_save_screen);
 	}
@@ -4696,7 +4748,10 @@ u16 screen_glyph(const struct vc_data *vc, int offset)
 {
 	u16 w = scr_readw(screenpos(vc, offset, true));
 	u16 c = w & 0xff;
+	u16 c_utf = scr_readw(screenpos_utf8(vc, offset, true));
 
+	if ((c == 0xff || c == 0xfe) && c_utf)
+		return c_utf;
 	if (w & vc->vc_hi_font_mask)
 		c |= 0x100;
 	return c;

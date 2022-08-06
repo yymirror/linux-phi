@@ -260,6 +260,10 @@ void kfence_report_error(unsigned long address, bool is_write, struct pt_regs *r
 
 	lockdep_on();
 
+#ifdef CONFIG_BUG_ON_DATA_CORRUPTION
+	BUG();
+#endif
+
 	if (panic_on_warn)
 		panic("panic_on_warn set ...\n");
 

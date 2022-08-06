@@ -203,6 +203,9 @@ static inline void __mm_zero_struct_page(struct page *page)
 
 extern int sysctl_max_map_count;
 
+extern unsigned long sysctl_clean_low_kbytes;
+extern unsigned long sysctl_clean_min_kbytes;
+
 extern unsigned long sysctl_user_reserve_kbytes;
 extern unsigned long sysctl_admin_reserve_kbytes;
 
@@ -779,7 +782,7 @@ static inline int is_vmalloc_or_module_addr(const void *x)
 }
 #endif
 
-extern void *kvmalloc_node(size_t size, gfp_t flags, int node);
+extern void *kvmalloc_node(size_t size, gfp_t flags, int node) __attribute__((alloc_size(1)));
 static inline void *kvmalloc(size_t size, gfp_t flags)
 {
 	return kvmalloc_node(size, flags, NUMA_NO_NODE);
@@ -914,10 +917,15 @@ static inline void set_compound_page_dtor(struct page *page,
 	page[1].compound_dtor = compound_dtor;
 }
 
-static inline void destroy_compound_page(struct page *page)
+static inline compound_page_dtor *get_compound_page_dtor(struct page *page)
 {
 	VM_BUG_ON_PAGE(page[1].compound_dtor >= NR_COMPOUND_DTORS, page);
-	compound_page_dtors[page[1].compound_dtor](page);
+	return compound_page_dtors[page[1].compound_dtor];
+}
+
+static inline void destroy_compound_page(struct page *page)
+{
+	(*get_compound_page_dtor(page))(page);
 }
 
 static inline unsigned int compound_order(struct page *page)
@@ -1070,6 +1078,8 @@ vm_fault_t finish_mkwrite_fault(struct vm_fault *vmf);
 #define ZONES_PGOFF		(NODES_PGOFF - ZONES_WIDTH)
 #define LAST_CPUPID_PGOFF	(ZONES_PGOFF - LAST_CPUPID_WIDTH)
 #define KASAN_TAG_PGOFF		(LAST_CPUPID_PGOFF - KASAN_TAG_WIDTH)
+#define LRU_GEN_PGOFF		(KASAN_TAG_PGOFF - LRU_GEN_WIDTH)
+#define LRU_USAGE_PGOFF		(LRU_GEN_PGOFF - LRU_USAGE_WIDTH)
 
 /*
  * Define the bit shifts to access each section.  For non-existent

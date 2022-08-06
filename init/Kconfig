@@ -101,6 +101,48 @@ config THREAD_INFO_IN_TASK
 
 menu "General setup"
 
+config SCHED_MUQSS
+	bool "MuQSS cpu scheduler"
+	select HIGH_RES_TIMERS
+	default n
+	help
+	  The Multiple Queue Skiplist Scheduler for excellent interactivity and
+	  responsiveness on the desktop and highly scalable deterministic
+	  low latency on any hardware.
+
+config ZEN_INTERACTIVE
+	bool "Tune kernel for interactivity"
+	default y
+	help
+	  Tunes the kernel for responsiveness at the cost of throughput and power usage.
+
+	  --- Block Layer ----------------------------------------
+
+	    Default scheduler.........: mq-deadline -> bfq
+
+	  --- Virtual Memory Subsystem ---------------------------
+
+	    Background-reclaim hugepages...:    no  -> yes
+
+	  --- CFS CPU Scheduler ----------------------------------
+
+	    Scheduling latency.............:   6    ->   4    ms
+	    Minimal granularity............:   0.75 ->   0.4  ms
+	    Wakeup granularity.............:   1    ->   0.5  ms
+	    CPU migration cost.............:   0.5  ->   0.25 ms
+	    Bandwidth slice size...........:   5    ->   3    ms
+	    Task rebalancing threshold.....:   32   ->   128
+	    Ondemand sampling down factor..:   1    ->   5
+
+	  --- MuQSS CPU Scheduler --------------------------------
+
+	    Scheduling interval............:   6    ->   4    ms
+	    ISO task max realtime use......:  70 %  ->  25 %
+	    Yield type.....................:   1    ->   0
+	    Ondemand default freq up thresh:  80    ->  40
+	    Ondemand micro freq up thresh..:  95    ->  45
+	    Ondemand sampling down factor..:   1    ->   5
+
 config BROKEN
 	bool
 
@@ -423,6 +465,7 @@ config USELIB
 config AUDIT
 	bool "Auditing support"
 	depends on NET
+	default y
 	help
 	  Enable auditing infrastructure that can be used with another
 	  kernel subsystem, such as SELinux (which requires this for
@@ -518,6 +561,7 @@ config SCHED_THERMAL_PRESSURE
 	default y if ARM64
 	depends on SMP
 	depends on CPU_FREQ_THERMAL
+	depends on !SCHED_MUQSS
 	help
 	  Select this option to enable thermal pressure accounting in the
 	  scheduler. Thermal pressure is the value conveyed to the scheduler
@@ -867,6 +911,7 @@ config NUMA_BALANCING
 	depends on ARCH_SUPPORTS_NUMA_BALANCING
 	depends on !ARCH_WANT_NUMA_VARIABLE_LOCALITY
 	depends on SMP && NUMA && MIGRATION
+	depends on !SCHED_MUQSS
 	help
 	  This option adds support for automatic NUMA aware memory/task placement.
 	  The mechanism is quite primitive and is based on migrating memory when
@@ -951,9 +996,13 @@ menuconfig CGROUP_SCHED
 	help
 	  This feature lets CPU scheduler recognize task groups and control CPU
 	  bandwidth allocation to such task groups. It uses cgroups to group
-	  tasks.
+	  tasks. In combination with MuQSS this is purely a STUB to create the
+	  files associated with the CPU controller cgroup but most of the
+	  controls do nothing. This is useful for working in environments and
+	  with applications that will only work if this control group is
+	  present.
 
-if CGROUP_SCHED
+if CGROUP_SCHED && !SCHED_MUQSS
 config FAIR_GROUP_SCHED
 	bool "Group scheduling for SCHED_OTHER"
 	depends on CGROUP_SCHED
@@ -1082,6 +1131,7 @@ config CGROUP_DEVICE
 
 config CGROUP_CPUACCT
 	bool "Simple CPU accounting controller"
+	depends on !SCHED_MUQSS
 	help
 	  Provides a simple controller for monitoring the
 	  total CPU consumed by the tasks in a cgroup.
@@ -1177,6 +1227,38 @@ config USER_NS
 
 	  If unsure, say N.
 
+config USER_NS_UNPRIVILEGED
+	bool "Allow unprivileged users to create namespaces"
+	default y
+	depends on USER_NS
+	help
+	  When disabled, unprivileged users will not be able to create
+	  new namespaces. Allowing users to create their own namespaces
+	  has been part of several recent local privilege escalation
+	  exploits, so if you need user namespaces but are
+	  paranoid^Wsecurity-conscious you want to disable this.
+
+	  This setting can be overridden at runtime via the
+	  kernel.unprivileged_userns_clone sysctl.
+
+	  If unsure, say Y.
+
+config USER_NS_UNPRIVILEGED
+	bool "Allow unprivileged users to create namespaces"
+	depends on USER_NS
+	default n
+	help
+	  When disabled, unprivileged users will not be able to create
+	  new namespaces. Allowing users to create their own namespaces
+	  has been part of several recent local privilege escalation
+	  exploits, so if you need user namespaces but are
+	  paranoid^Wsecurity-conscious you want to disable this.
+
+	  This setting can be overridden at runtime via the
+	  kernel.unprivileged_userns_clone sysctl.
+
+	  If unsure, say N.
+
 config PID_NS
 	bool "PID Namespaces"
 	default y
@@ -1210,6 +1292,7 @@ config CHECKPOINT_RESTORE
 
 config SCHED_AUTOGROUP
 	bool "Automatic process group scheduling"
+	depends on !SCHED_MUQSS
 	select CGROUPS
 	select CGROUP_SCHED
 	select FAIR_GROUP_SCHED
@@ -1316,7 +1399,6 @@ config CC_OPTIMIZE_FOR_PERFORMANCE
 
 config CC_OPTIMIZE_FOR_PERFORMANCE_O3
 	bool "Optimize more for performance (-O3)"
-	depends on ARC
 	help
 	  Choosing this option will pass "-O3" to your compiler to optimize
 	  the kernel yet more for performance.
@@ -1407,9 +1489,8 @@ menuconfig EXPERT
 	  Only use this if you really know what you are doing.
 
 config UID16
-	bool "Enable 16-bit UID system calls" if EXPERT
+	bool "Enable 16-bit UID system calls"
 	depends on HAVE_UID16 && MULTIUSER
-	default y
 	help
 	  This enables the legacy 16-bit UID syscall wrappers.
 
@@ -1438,14 +1519,13 @@ config SGETMASK_SYSCALL
 	  If unsure, leave the default option here.
 
 config SYSFS_SYSCALL
-	bool "Sysfs syscall support" if EXPERT
-	default y
+	bool "Sysfs syscall support"
 	help
 	  sys_sysfs is an obsolete system call no longer supported in libc.
 	  Note that disabling this option is more secure but might break
 	  compatibility with some systems.
 
-	  If unsure say Y here.
+	  If unsure say N here.
 
 config FHANDLE
 	bool "open by fhandle syscalls" if EXPERT
@@ -1537,6 +1617,13 @@ config FUTEX
 	  support for "fast userspace mutexes".  The resulting kernel may not
 	  run glibc-based applications correctly.
 
+config FUTEX2
+	bool "Enable futex2 support" if EXPERT
+	depends on FUTEX
+	default y
+	help
+	  Support for futex2 interface.
+
 config FUTEX_PI
 	bool
 	depends on FUTEX && RT_MUTEXES
@@ -1596,8 +1683,7 @@ config SHMEM
 	  which may be appropriate on small systems without swap.
 
 config AIO
-	bool "Enable AIO support" if EXPERT
-	default y
+	bool "Enable AIO support"
 	help
 	  This option enables POSIX asynchronous I/O which may by used
 	  by some high performance threaded applications. Disabling
@@ -1858,7 +1944,7 @@ config VM_EVENT_COUNTERS
 
 config SLUB_DEBUG
 	default y
-	bool "Enable SLUB debugging support" if EXPERT
+	bool "Enable SLUB debugging support"
 	depends on SLUB && SYSFS
 	help
 	  SLUB has extensive debug support features. Disabling these can
@@ -1868,7 +1954,6 @@ config SLUB_DEBUG
 
 config COMPAT_BRK
 	bool "Disable heap randomization"
-	default y
 	help
 	  Randomizing heap placement makes heap exploits harder, but it
 	  also breaks ancient binaries (including anything libc5 based).
@@ -1915,7 +2000,6 @@ endchoice
 
 config SLAB_MERGE_DEFAULT
 	bool "Allow slab caches to be merged"
-	default y
 	help
 	  For reduced kernel memory fragmentation, slab caches can be
 	  merged when they share the same size and other characteristics.
@@ -1930,6 +2014,7 @@ config SLAB_MERGE_DEFAULT
 config SLAB_FREELIST_RANDOM
 	bool "Randomize slab freelist"
 	depends on SLAB || SLUB
+	default y
 	help
 	  Randomizes the freelist order used on creating new pages. This
 	  security feature reduces the predictability of the kernel slab
@@ -1938,6 +2023,7 @@ config SLAB_FREELIST_RANDOM
 config SLAB_FREELIST_HARDENED
 	bool "Harden slab freelist metadata"
 	depends on SLAB || SLUB
+	default y
 	help
 	  Many kernel heap attacks try to target slab cache metadata and
 	  other infrastructure. This options makes minor performance
@@ -1945,6 +2031,23 @@ config SLAB_FREELIST_HARDENED
 	  freelist exploit methods. Some slab implementations have more
 	  sanity-checking than others. This option is most effective with
 	  CONFIG_SLUB.
+
+config SLAB_CANARY
+	depends on SLUB
+	depends on !SLAB_MERGE_DEFAULT
+	bool "SLAB canaries"
+	default y
+	help
+	  Place canaries at the end of kernel slab allocations, sacrificing
+	  some performance and memory usage for security.
+
+	  Canaries can detect some forms of heap corruption when allocations
+	  are freed and as part of the HARDENED_USERCOPY feature. It provides
+	  basic use-after-free detection for HARDENED_USERCOPY.
+
+	  Canaries absorb small overflows (rendering them harmless), mitigate
+	  non-NUL terminated C string overflows on 64-bit via a guaranteed zero
+	  byte and provide basic double-free detection.
 
 config SHUFFLE_PAGE_ALLOCATOR
 	bool "Page allocator randomization"
@@ -2217,8 +2320,8 @@ config MODULE_COMPRESS
 	bool "Compress modules on installation"
 	help
 
-	  Compresses kernel modules when 'make modules_install' is run; gzip or
-	  xz depending on "Compression algorithm" below.
+	  Compresses kernel modules when 'make modules_install' is run; gzip,
+	  xz, or zstd depending on "Compression algorithm" below.
 
 	  module-init-tools MAY support gzip, and kmod MAY support gzip and xz.
 
@@ -2240,13 +2343,16 @@ choice
 	  This determines which sort of compression will be used during
 	  'make modules_install'.
 
-	  GZIP (default) and XZ are supported.
+	  GZIP (default), XZ, and ZSTD are supported.
 
 config MODULE_COMPRESS_GZIP
 	bool "GZIP"
 
 config MODULE_COMPRESS_XZ
 	bool "XZ"
+
+config MODULE_COMPRESS_ZSTD
+	bool "ZSTD"
 
 endchoice
 

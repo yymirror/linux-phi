@@ -524,17 +524,6 @@
 			nosocket -- Disable socket memory accounting.
 			nokmem -- Disable kernel memory accounting.
 
-	checkreqprot	[SELINUX] Set initial checkreqprot flag value.
-			Format: { "0" | "1" }
-			See security/selinux/Kconfig help text.
-			0 -- check protection applied by kernel (includes
-				any implied execute protection).
-			1 -- check protection requested by application.
-			Default value is set via a kernel config option.
-			Value can be changed at runtime via
-				/sys/fs/selinux/checkreqprot.
-			Setting checkreqprot to 1 is deprecated.
-
 	cio_ignore=	[S390]
 			See Documentation/s390/common_io.rst for details.
 	clk_ignore_unused
@@ -1906,6 +1895,9 @@
 			disable
 			  Do not enable intel_pstate as the default
 			  scaling driver for the supported processors
+			enable
+			  Enable intel_pstate in-case "disable" was passed
+			  previously in the kernel boot parameters
 			passive
 			  Use intel_pstate as a scaling driver, but configure it
 			  to work with generic cpufreq governors (instead of
@@ -3604,6 +3596,11 @@
 			the specified number of seconds.  This is to be used if
 			your oopses keep scrolling off the screen.
 
+	extra_latent_entropy
+			Enable a very simple form of latent entropy extraction
+			from the first 4GB of memory as the bootmem allocator
+			passes the memory pages to the buddy allocator.
+
 	pcbit=		[HW,ISDN]
 
 	pcd.		[PARIDE]
@@ -3667,6 +3664,15 @@
 		nomsi		[MSI] If the PCI_MSI kernel config parameter is
 				enabled, this kernel boot option can be used to
 				disable the use of MSI interrupts system-wide.
+		pcie_acs_override =
+					[PCIE] Override missing PCIe ACS support for:
+				downstream
+					All downstream ports - full ACS capabilities
+				multfunction
+					All multifunction devices - multifunction ACS subset
+				id:nnnn:nnnn
+					Specfic device - full ACS capabilities
+					Specified as vid:did (vendor/device ID) in hex
 		noioapicquirk	[APIC] Disable all boot interrupt quirks.
 				Safety option to keep boot IRQs enabled. This
 				should never be necessary.
@@ -4629,11 +4635,6 @@
 			Reserves a hole at the top of the kernel virtual
 			address space.
 
-	reservelow=	[X86]
-			Format: nn[K]
-			Set the amount of memory to reserve for BIOS at
-			the bottom of the address space.
-
 	reset_devices	[KNL] Force drivers to reset the underlying device
 			during initialization.
 
@@ -4715,6 +4716,15 @@
 			[KNL,ARM,CMA] Remoteproc physical memory block.
 			Memory area to be used by remote processor image,
 			managed by CMA.
+
+	rqshare=	[X86] Select the MuQSS scheduler runqueue sharing type.
+			Format: <string>
+			smt -- Share SMT (hyperthread) sibling runqueues
+			mc -- Share MC (multicore) sibling runqueues
+			llc -- Share MC (multicore) sibling runqueues with adjacent LLC
+			smp -- Share SMP runqueues
+			none -- Do not share any runqueues
+			Default value is mc
 
 	rw		[KNL] Mount root device read-write on boot
 

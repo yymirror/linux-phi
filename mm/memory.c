@@ -73,6 +73,7 @@
 #include <linux/perf_event.h>
 #include <linux/ptrace.h>
 #include <linux/vmalloc.h>
+#include <linux/mm_inline.h>
 
 #include <trace/events/kmem.h>
 
@@ -158,6 +159,25 @@ EXPORT_SYMBOL(zero_pfn);
 
 unsigned long highest_memmap_pfn __read_mostly;
 
+#ifdef CONFIG_UKSM
+unsigned long uksm_zero_pfn __read_mostly;
+EXPORT_SYMBOL_GPL(uksm_zero_pfn);
+struct page *empty_uksm_zero_page;
+
+static int __init setup_uksm_zero_page(void)
+{
+	empty_uksm_zero_page = alloc_pages(__GFP_ZERO & ~__GFP_MOVABLE, 0);
+	if (!empty_uksm_zero_page)
+		panic("Oh boy, that early out of memory?");
+
+	SetPageReserved(empty_uksm_zero_page);
+	uksm_zero_pfn = page_to_pfn(empty_uksm_zero_page);
+
+	return 0;
+}
+core_initcall(setup_uksm_zero_page);
+#endif
+
 /*
  * CONFIG_MMU architectures set up ZERO_PAGE in their paging_init()
  */
@@ -172,6 +192,7 @@ void mm_trace_rss_stat(struct mm_struct *mm, int member, long count)
 {
 	trace_rss_stat(mm, member, count);
 }
+
 
 #if defined(SPLIT_RSS_COUNTING)
 
@@ -839,7 +860,7 @@ copy_present_page(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma
 	copy_user_highpage(new_page, page, addr, src_vma);
 	__SetPageUptodate(new_page);
 	page_add_new_anon_rmap(new_page, dst_vma, addr, false);
-	lru_cache_add_inactive_or_unevictable(new_page, dst_vma);
+	lru_cache_add_page_vma(new_page, dst_vma, false);
 	rss[mm_counter(new_page)]++;
 
 	/* All done, just insert the new page copy in the child */
@@ -875,6 +896,11 @@ copy_present_pte(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma,
 		get_page(page);
 		page_dup_rmap(page, false);
 		rss[mm_counter(page)]++;
+
+		/* Should return NULL in vm_normal_page() */
+		uksm_bugon_zeropage(pte);
+	} else {
+		uksm_map_zero_page(pte);
 	}
 
 	/*
@@ -1254,8 +1280,10 @@ again:
 			ptent = ptep_get_and_clear_full(mm, addr, pte,
 							tlb->fullmm);
 			tlb_remove_tlb_entry(tlb, pte, addr);
-			if (unlikely(!page))
+			if (unlikely(!page)) {
+				uksm_unmap_zero_page(ptent);
 				continue;
+			}
 
 			if (!PageAnon(page)) {
 				if (pte_dirty(ptent)) {
@@ -2614,6 +2642,7 @@ static inline bool cow_user_page(struct page *dst, struct page *src,
 
 	if (likely(src)) {
 		copy_user_highpage(dst, src, addr, vma);
+		uksm_cow_page(vma, src);
 		return true;
 	}
 
@@ -2860,6 +2889,7 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 							      vmf->address);
 		if (!new_page)
 			goto oom;
+		uksm_cow_pte(vma, vmf->orig_pte);
 	} else {
 		new_page = alloc_page_vma(GFP_HIGHUSER_MOVABLE, vma,
 				vmf->address);
@@ -2902,7 +2932,9 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 						mm_counter_file(old_page));
 				inc_mm_counter_fast(mm, MM_ANONPAGES);
 			}
+			uksm_bugon_zeropage(vmf->orig_pte);
 		} else {
+			uksm_unmap_zero_page(vmf->orig_pte);
 			inc_mm_counter_fast(mm, MM_ANONPAGES);
 		}
 		flush_cache_page(vma, vmf->address, pte_pfn(vmf->orig_pte));
@@ -2919,7 +2951,7 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 		 */
 		ptep_clear_flush_notify(vma, vmf->address, vmf->pte);
 		page_add_new_anon_rmap(new_page, vma, vmf->address, false);
-		lru_cache_add_inactive_or_unevictable(new_page, vma);
+		lru_cache_add_page_vma(new_page, vma, true);
 		/*
 		 * We call the notify macro here because, when using secondary
 		 * mmu page tables (such as kvm shadow page tables), we want the
@@ -3483,9 +3515,10 @@ vm_fault_t do_swap_page(struct vm_fault *vmf)
 	/* ksm created a completely new copy */
 	if (unlikely(page != swapcache && swapcache)) {
 		page_add_new_anon_rmap(page, vma, vmf->address, false);
-		lru_cache_add_inactive_or_unevictable(page, vma);
+		lru_cache_add_page_vma(page, vma, true);
 	} else {
 		do_page_add_anon_rmap(page, vma, vmf->address, exclusive);
+		lru_gen_activation(page, vma);
 	}
 
 	swap_free(entry);
@@ -3634,7 +3667,7 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 
 	inc_mm_counter_fast(vma->vm_mm, MM_ANONPAGES);
 	page_add_new_anon_rmap(page, vma, vmf->address, false);
-	lru_cache_add_inactive_or_unevictable(page, vma);
+	lru_cache_add_page_vma(page, vma, true);
 setpte:
 	set_pte_at(vma->vm_mm, vmf->address, vmf->pte, entry);
 
@@ -3759,6 +3792,7 @@ vm_fault_t do_set_pmd(struct vm_fault *vmf, struct page *page)
 
 	add_mm_counter(vma->vm_mm, mm_counter_file(page), HPAGE_PMD_NR);
 	page_add_file_rmap(page, true);
+	lru_gen_activation(page, vma);
 	/*
 	 * deposit and withdraw with pmd lock held
 	 */
@@ -3804,10 +3838,11 @@ void do_set_pte(struct vm_fault *vmf, struct page *page, unsigned long addr)
 	if (write && !(vma->vm_flags & VM_SHARED)) {
 		inc_mm_counter_fast(vma->vm_mm, MM_ANONPAGES);
 		page_add_new_anon_rmap(page, vma, addr, false);
-		lru_cache_add_inactive_or_unevictable(page, vma);
+		lru_cache_add_page_vma(page, vma, true);
 	} else {
 		inc_mm_counter_fast(vma->vm_mm, mm_counter_file(page));
 		page_add_file_rmap(page, false);
+		lru_gen_activation(page, vma);
 	}
 	set_pte_at(vma->vm_mm, addr, vmf->pte, entry);
 }

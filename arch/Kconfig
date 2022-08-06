@@ -782,6 +782,15 @@ config HAVE_ARCH_TRANSPARENT_HUGEPAGE
 config HAVE_ARCH_TRANSPARENT_HUGEPAGE_PUD
 	bool
 
+config HAVE_ARCH_PARENT_PMD_YOUNG
+	bool
+	depends on PGTABLE_LEVELS > 2
+	help
+	  Architectures that select this are able to set the accessed bit on
+	  non-leaf PMD entries in addition to leaf PTE entries where pages are
+	  mapped. For them, page table walkers that clear the accessed bit may
+	  stop at non-leaf PMD entries when they do not see the accessed bit.
+
 config HAVE_ARCH_HUGE_VMAP
 	bool
 
@@ -865,7 +874,7 @@ config ARCH_MMAP_RND_BITS
 	int "Number of bits to use for ASLR of mmap base address" if EXPERT
 	range ARCH_MMAP_RND_BITS_MIN ARCH_MMAP_RND_BITS_MAX
 	default ARCH_MMAP_RND_BITS_DEFAULT if ARCH_MMAP_RND_BITS_DEFAULT
-	default ARCH_MMAP_RND_BITS_MIN
+	default ARCH_MMAP_RND_BITS_MAX
 	depends on HAVE_ARCH_MMAP_RND_BITS
 	help
 	  This value can be used to select the number of bits to use to
@@ -899,7 +908,7 @@ config ARCH_MMAP_RND_COMPAT_BITS
 	int "Number of bits to use for ASLR of mmap base address for compatible applications" if EXPERT
 	range ARCH_MMAP_RND_COMPAT_BITS_MIN ARCH_MMAP_RND_COMPAT_BITS_MAX
 	default ARCH_MMAP_RND_COMPAT_BITS_DEFAULT if ARCH_MMAP_RND_COMPAT_BITS_DEFAULT
-	default ARCH_MMAP_RND_COMPAT_BITS_MIN
+	default ARCH_MMAP_RND_COMPAT_BITS_MAX
 	depends on HAVE_ARCH_MMAP_RND_COMPAT_BITS
 	help
 	  This value can be used to select the number of bits to use to

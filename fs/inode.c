@@ -116,6 +116,10 @@ int proc_nr_inodes(struct ctl_table *table, int write,
 }
 #endif
 
+/* sysctl */
+int device_sidechannel_restrict __read_mostly = 1;
+EXPORT_SYMBOL(device_sidechannel_restrict);
+
 static int no_open(struct inode *inode, struct file *file)
 {
 	return -ENXIO;
@@ -139,6 +143,7 @@ int inode_init_always(struct super_block *sb, struct inode *inode)
 	inode->i_blkbits = sb->s_blocksize_bits;
 	inode->i_flags = 0;
 	atomic64_set(&inode->i_sequence, 0);
+	atomic64_set(&inode->i_sequence2, 0);
 	atomic_set(&inode->i_count, 1);
 	inode->i_op = &empty_iops;
 	inode->i_fop = &no_open_fops;
