@@ -1,0 +1,17 @@
+[ req ]
+default_bits = 4096
+distinguished_name = req_distinguished_name
+prompt = no
+string_mask = utf8only
+x509_extensions = this_exts
+
+[ req_distinguished_name ]
+O = linux-phi
+CN = merge hardened and zen.
+emailAddress = yyscript@proton.me
+
+[ this_exts ]
+basicConstraints = critical,CA:FALSE
+keyUsage = digitalSignature
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid
