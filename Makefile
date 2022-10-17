@@ -901,20 +901,14 @@ export CC_FLAGS_SCS
 endif
 
 ifdef CONFIG_LTO_CLANG
+
 CC_FLAGS_LTO	:= -flto=thin -fsplit-lto-unit
 KBUILD_LDFLAGS	+= --thinlto-cache-dir=$(extmod-prefix).thinlto-cache
-endif
+
 CC_FLAGS_LTO	+= -fvisibility=hidden
 
 # Limit inlining across translation units to reduce binary size
 KBUILD_LDFLAGS += -mllvm -import-instr-limit=5
-
-# Check for frame size exceeding threshold during prolog/epilog insertion
-# when using lld < 13.0.0.
-ifneq ($(CONFIG_FRAME_WARN),0)
-ifeq ($(shell test $(CONFIG_LLD_VERSION) -lt 130000; echo $$?),0)
-KBUILD_LDFLAGS	+= -plugin-opt=-warn-stack-size=$(CONFIG_FRAME_WARN)
-endif
 endif
 endif
 
@@ -1055,16 +1049,7 @@ export MODLIB
 # the default option --strip-debug will be used.  Otherwise,
 # INSTALL_MOD_STRIP value will be used as the options to the strip command.
 INSTALL_MOD_STRIP := --strip-unneeded --strip-debug
-
-ifdef INSTALL_MOD_STRIP
-ifeq ($(INSTALL_MOD_STRIP),1)
-mod_strip_cmd = $(STRIP) --strip-debug
-else
 mod_strip_cmd = $(STRIP) $(INSTALL_MOD_STRIP)
-endif # INSTALL_MOD_STRIP=1
-else
-mod_strip_cmd = true
-endif # INSTALL_MOD_STRIP
 export mod_strip_cmd
 
 # CONFIG_MODULE_COMPRESS, if defined, will cause module to be compressed
@@ -1997,7 +1982,6 @@ existing-targets := $(wildcard $(sort $(targets)))
 
 endif # config-build
 endif # mixed-build
-endif # need-sub-make
 
 PHONY += FORCE
 FORCE:
